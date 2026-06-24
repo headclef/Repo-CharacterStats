@@ -1,4 +1,6 @@
+using System;
 using System.Collections.Generic;
+using System.Reflection;
 using BepInEx;
 using BepInEx.Logging;
 using HarmonyLib;
@@ -10,7 +12,7 @@ public class Character_Stats : BaseUnityPlugin
 {
     private const string PluginGuid = "headclef.CharacterStats";
     private const string PluginName = "Character Stats";
-    private const string PluginVersion = "1.0.0";
+    private const string PluginVersion = "1.1.0";
 
     internal static Character_Stats Instance { get; private set; } = null!;
     internal new static ManualLogSource Logger => Instance._logger;
@@ -89,34 +91,110 @@ public class Character_Stats : BaseUnityPlugin
         return PlayerController.instance?.playerSteamID;
     }
 
+    // ── Short consumer key → live StatsManager dictionary field name ──
+    // Every consumer mod (Agility/Armor/Constitution/Increase Tumble Damage/UI)
+    // queries by these short names. We read the live per-player dictionaries on
+    // StatsManager directly (the SAME fields the game and stat-applying mods like
+    // Improve write to), so a value applied locally — e.g. Improve raising
+    // playerUpgradeLaunch — is immediately visible here. The game's own
+    // FetchPlayerUpgrades aggregate can read a secondary/stale source (and throws
+    // if any per-stat dict has no entry for a player yet), so it is NOT the source
+    // of truth — see RefreshStats.
+    private static readonly (string Key, string Field)[] _statKeyMap =
+    {
+        ("Health", "playerUpgradeHealth"),
+        ("Stamina", "playerUpgradeStamina"),
+        ("Speed", "playerUpgradeSpeed"),
+        ("Strength", "playerUpgradeStrength"),
+        ("Range", "playerUpgradeRange"),
+        ("Throw", "playerUpgradeThrow"),
+        ("Extra Jump", "playerUpgradeExtraJump"),
+        ("Launch", "playerUpgradeLaunch"),
+        ("Crouch Rest", "playerUpgradeCrouchRest"),
+        ("Map Player Count", "playerUpgradeMapPlayerCount"),
+        ("Tumble Climb", "playerUpgradeTumbleClimb"),
+        ("Tumble Wings", "playerUpgradeTumbleWings"),
+        ("Death Head Battery", "playerUpgradeDeathHeadBattery"),
+    };
+
+    private static readonly Dictionary<string, FieldInfo?> _dictFieldCache = new();
+
+    private static Dictionary<string, int>? GetStatDict(string fieldName)
+    {
+        if (!_dictFieldCache.TryGetValue(fieldName, out var fi))
+        {
+            fi = typeof(StatsManager).GetField(fieldName,
+                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            _dictFieldCache[fieldName] = fi;
+        }
+        return fi?.GetValue(StatsManager.instance) as Dictionary<string, int>;
+    }
+
+    // private static float _lastDiagTime;  // TEMP diagnostic throttle (disabled — fix confirmed; needs `using UnityEngine;` if re-enabled)
+
     // ── Internal: called by StatReaderPatch to refresh cached data ──
 
     internal static void RefreshStats()
     {
-        _playerStats.Clear();
+        var sm = StatsManager.instance;
+        if (sm == null) return;  // not ready — keep whatever we cached
 
         var players = SemiFunc.PlayerGetAll();
-        if (players == null || players.Count == 0)
-        {
-            _statsReady = false;
-            return;
-        }
+        if (players == null || players.Count == 0) return;  // keep previous cache
+
+        var fresh = new Dictionary<string, Dictionary<string, int>>();
 
         foreach (var player in players)
         {
             string steamId = SemiFunc.PlayerGetSteamID(player);
-            var upgrades = StatsManager.instance.FetchPlayerUpgrades(steamId);
+            if (string.IsNullOrEmpty(steamId)) continue;
 
-            if (upgrades != null)
+            var upgrades = new Dictionary<string, int>();
+
+            // Best-effort: the game's aggregate (key naming may differ; guarded
+            // because it throws if a per-stat dict lacks an entry for this player).
+            try
             {
-                _playerStats[steamId] = new Dictionary<string, int>(upgrades);
-
-                Logger.LogDebug($"Stats for {steamId}: {string.Join(", ", upgrades)}");
+                var fetched = sm.FetchPlayerUpgrades(steamId);
+                if (fetched != null)
+                    foreach (var kv in fetched)
+                        upgrades[kv.Key] = kv.Value;
             }
+            catch (Exception ex)
+            {
+                Logger.LogDebug($"FetchPlayerUpgrades threw for {steamId}: {ex.Message}");
+            }
+
+            // Authoritative overlay: live named dictionaries win, so Improve-applied
+            // values are always reflected for every consumer key.
+            foreach (var (key, field) in _statKeyMap)
+            {
+                var dict = GetStatDict(field);
+                if (dict != null && dict.TryGetValue(steamId, out int v))
+                    upgrades[key] = v;
+            }
+
+            fresh[steamId] = upgrades;
         }
 
+        if (fresh.Count == 0) return;  // nothing valid this pass — keep previous cache
+
+        // Swap contents only after every read succeeded, so a mid-refresh failure
+        // never leaves consumers staring at an empty cache.
+        _playerStats.Clear();
+        foreach (var kv in fresh)
+            _playerStats[kv.Key] = kv.Value;
         _statsReady = true;
-        Logger.LogInfo($"Character stats refreshed for {_playerStats.Count} player(s).");
+
+        // TEMP DIAGNOSTIC (disabled — Improve/tumble fix confirmed). Re-enable (and
+        // restore `using UnityEngine;`) to log what the cache reads each refresh.
+        // if (Time.time - _lastDiagTime > 3f)
+        // {
+        //     _lastDiagTime = Time.time;
+        //     string? localId = GetLocalSteamId();
+        //     int launch = localId != null ? GetUpgradeLevel(localId, "Launch") : -1;
+        //     Logger.LogInfo($"[CSDiag] refreshed {_playerStats.Count} player(s); local '{localId}' Launch={launch}");
+        // }
     }
 
     internal static void ClearStats()
