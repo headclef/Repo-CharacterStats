@@ -4,9 +4,9 @@ A lightweight [BepInEx](https://github.com/BepInEx/BepInEx) library mod for **R.
 
 ## What This Mod Does
 
-- **Reads** all 12 character upgrade stats from the game's `StatsManager`
+- **Reads** all 13 character upgrade stats from the game's `StatsManager`
 - **Caches** them in a simple, accessible API for other mods to consume
-- **Refreshes** automatically after level generation and network sync
+- **Refreshes** automatically after level generation, periodically during a level, and on network sync
 - **Does NOT modify** any stats — this is a **read-only** information provider
 
 > This mod does **nothing** on its own. It exists so that other mods (like [Increase Tumble Damage](https://github.com/headclef/Repo-IncreaseTumbleDamage)) can reliably access player stat data without conflicting with each other.
@@ -36,14 +36,17 @@ string? myId = GetLocalSteamId();
 
 ### Available Upgrade Keys
 
-`Health`, `Speed`, `Map Player Count`, `Stamina`, `Extra Jump`, `Range`, `Strength`, `Throw`, `Launch`, `Crouch Rest`, `Tumble Wings`, `Tumble Climb`, `Death Head`
+`Health`, `Speed`, `Map Player Count`, `Stamina`, `Extra Jump`, `Range`, `Strength`, `Throw`, `Launch`, `Crouch Rest`, `Tumble Wings`, `Tumble Climb`, `Death Head Battery`
 
 ## Timing
 
 Stats are read at these points:
-1. **1 second after level generation** completes — ensures all mods (leveling, upgrade sharing, etc.) have finished applying their upgrades
-2. **After `ReceiveSyncData`** — re-reads stats when network sync overwrites data (e.g., when another mod shares upgrades)
-3. **On progress reset** — clears cached stats
+1. **1 second after level generation** completes — gives all mods (leveling, upgrade sharing, etc.) time to apply their upgrades
+2. **Every 1 second while in a level** — re-reads continuously so values applied *after* level start (e.g. by Improve) are always reflected, instead of latching a stale snapshot
+3. **After `ReceiveSyncData`** — re-reads when network sync overwrites data (e.g., when another mod shares upgrades)
+4. **On progress reset** — clears cached stats
+
+Values are read directly from the game's live `StatsManager` dictionaries, so they always match what the game (and stat-applying mods like Improve) actually use.
 
 ## Requirements
 
@@ -74,7 +77,7 @@ To use Character Stats as a dependency in your mod:
 
 3. Add the Thunderstore dependency in your `manifest.json`:
 ```json
-"dependencies": ["headclef-CharacterStats-1.0.0"]
+"dependencies": ["headclef-CharacterStats-1.1.0"]
 ```
 
 ## Project Structure
