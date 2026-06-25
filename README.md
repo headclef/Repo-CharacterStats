@@ -18,19 +18,19 @@ Other mods can reference `Character Stats.dll` and call these static methods:
 ```csharp
 using static Character_Stats.Character_Stats;
 
-// Get a specific upgrade level for a player
+// Get a specific upgrade level for a player (returns 0 if unknown)
 int launchLevel = GetUpgradeLevel(steamId, "Launch");
 
-// Get all upgrades for a player
+// Get all upgrades for a player (returns a copy; empty dict if unknown)
 Dictionary<string, int> upgrades = GetAllUpgrades(steamId);
 
-// Check if stats have been read this level
+// Check if stats have been read at least once this level
 if (AreStatsReady) { ... }
 
 // Get all tracked player Steam IDs
 foreach (var id in GetTrackedPlayers()) { ... }
 
-// Get local player's Steam ID
+// Get local player's Steam ID (null if unavailable)
 string? myId = GetLocalSteamId();
 ```
 
@@ -53,6 +53,8 @@ Values are read directly from the game's live `StatsManager` dictionaries, so th
 - [BepInEx 5.x](https://github.com/BepInEx/BepInEx) installed for R.E.P.O.
 
 ## Installation
+
+Character Stats is usually installed **automatically** as a dependency when you install a mod that needs it (via Thunderstore). To install it manually:
 
 1. Download the latest release.
 2. Place `Character Stats.dll` into your `BepInEx/plugins` folder.
@@ -89,8 +91,11 @@ To use Character Stats as a dependency in your mod:
 ```
 
 ## Building
+
+This project is the base library the other mods compile against. It has no dependencies of its own, but building the **whole solution** keeps every dependent mod in sync:
+
 ```bash
-dotnet build
+dotnet build ../Repo.slnx
 ```
 
 ## License
