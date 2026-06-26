@@ -12,7 +12,7 @@ public class Character_Stats : BaseUnityPlugin
 {
     private const string PluginGuid = "headclef.CharacterStats";
     private const string PluginName = "Character Stats";
-    private const string PluginVersion = "1.1.0";
+    private const string PluginVersion = "1.2.0";
 
     internal static Character_Stats Instance { get; private set; } = null!;
     internal new static ManualLogSource Logger => Instance._logger;
@@ -22,6 +22,17 @@ public class Character_Stats : BaseUnityPlugin
     // ── Cached stat data (read-only, refreshed automatically) ──
     private static readonly Dictionary<string, Dictionary<string, int>> _playerStats = new();
     private static bool _statsReady;
+
+    // ── Temporary bonus overlay (steamId → key → bonus) ──
+    // A live, additive layer on top of the cached stat values, applied at READ time
+    // in GetUpgradeLevel / GetAllUpgrades. Mods like Berserk register a transient
+    // bonus here (e.g. +5 Strength while berserking) so every consumer (Armor,
+    // Increase Tumble Damage, UI…) sees the boosted level instantly — WITHOUT writing
+    // it into the game's StatsManager dictionaries. That matters: Improve reconciles
+    // those dictionaries directly and never reads this overlay, so a temporary bonus
+    // can never be absorbed into Improve's tracking or baked into the .es3 save. The
+    // owning mod is responsible for clearing its bonus when the effect ends.
+    private static readonly Dictionary<string, Dictionary<string, int>> _tempBonuses = new();
 
     private void Awake()
     {
@@ -50,28 +61,91 @@ public class Character_Stats : BaseUnityPlugin
     public static bool AreStatsReady => _statsReady;
 
     /// <summary>
-    /// Get a specific upgrade level for a player.
-    /// Returns 0 if not found.
+    /// Get a specific upgrade level for a player, including any temporary bonus
+    /// registered via <see cref="SetTemporaryBonus"/>. Returns 0 if not found.
     /// </summary>
     public static int GetUpgradeLevel(string steamId, string upgradeKey)
     {
+        int level = 0;
         if (_playerStats.TryGetValue(steamId, out var upgrades) &&
-            upgrades.TryGetValue(upgradeKey, out int level))
+            upgrades.TryGetValue(upgradeKey, out int cached))
         {
-            return level;
+            level = cached;
         }
-        return 0;
+        return level + GetTemporaryBonus(steamId, upgradeKey);
     }
 
     /// <summary>
-    /// Get all upgrade levels for a player.
+    /// Get all upgrade levels for a player, including any temporary bonuses.
     /// Returns an empty dictionary if not found.
     /// </summary>
     public static Dictionary<string, int> GetAllUpgrades(string steamId)
     {
+        var result = new Dictionary<string, int>();
         if (_playerStats.TryGetValue(steamId, out var upgrades))
-            return new Dictionary<string, int>(upgrades);
-        return new Dictionary<string, int>();
+            foreach (var kv in upgrades)
+                result[kv.Key] = kv.Value;
+
+        if (_tempBonuses.TryGetValue(steamId, out var bonuses))
+            foreach (var kv in bonuses)
+                result[kv.Key] = (result.TryGetValue(kv.Key, out int v) ? v : 0) + kv.Value;
+
+        return result;
+    }
+
+    // ── Temporary bonus overlay API ──
+
+    /// <summary>
+    /// Register (or update) a temporary additive bonus for a player's upgrade key.
+    /// The bonus is layered on top of the real value at read time and is NEVER written
+    /// into the game's StatsManager dictionaries, so it stays invisible to Improve and
+    /// is never saved. Pass <paramref name="amount"/> 0 to remove the bonus. The caller
+    /// owns the lifecycle and must clear it when the effect ends.
+    /// Use the SAME upgrade keys as <see cref="GetUpgradeLevel"/> (e.g. "Strength", "Launch").
+    /// </summary>
+    public static void SetTemporaryBonus(string steamId, string upgradeKey, int amount)
+    {
+        if (string.IsNullOrEmpty(steamId) || string.IsNullOrEmpty(upgradeKey))
+            return;
+
+        if (amount == 0)
+        {
+            ClearTemporaryBonus(steamId, upgradeKey);
+            return;
+        }
+
+        if (!_tempBonuses.TryGetValue(steamId, out var bonuses))
+        {
+            bonuses = new Dictionary<string, int>();
+            _tempBonuses[steamId] = bonuses;
+        }
+        bonuses[upgradeKey] = amount;
+    }
+
+    /// <summary>Remove a single temporary bonus.</summary>
+    public static void ClearTemporaryBonus(string steamId, string upgradeKey)
+    {
+        if (_tempBonuses.TryGetValue(steamId, out var bonuses))
+        {
+            bonuses.Remove(upgradeKey);
+            if (bonuses.Count == 0)
+                _tempBonuses.Remove(steamId);
+        }
+    }
+
+    /// <summary>Remove all temporary bonuses for a player.</summary>
+    public static void ClearAllTemporaryBonuses(string steamId)
+    {
+        _tempBonuses.Remove(steamId);
+    }
+
+    /// <summary>Read the current temporary bonus for a key (0 if none).</summary>
+    public static int GetTemporaryBonus(string steamId, string upgradeKey)
+    {
+        if (_tempBonuses.TryGetValue(steamId, out var bonuses) &&
+            bonuses.TryGetValue(upgradeKey, out int v))
+            return v;
+        return 0;
     }
 
     /// <summary>
