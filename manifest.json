@@ -1,6 +1,6 @@
 {
     "name": "CharacterStats",
-    "version_number": "1.1.0",
+    "version_number": "1.2.0",
     "website_url": "https://github.com/headclef/Repo-CharacterStats",
     "description": "A read-only library that caches player character stats for other mods to use in R.E.P.O.",
     "dependencies": [
