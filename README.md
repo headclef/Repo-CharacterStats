@@ -79,7 +79,7 @@ To use Character Stats as a dependency in your mod:
 
 3. Add the Thunderstore dependency in your `manifest.json`:
 ```json
-"dependencies": ["headclef-CharacterStats-1.1.0"]
+"dependencies": ["headclef-CharacterStats-1.2.0"]
 ```
 
 ## Project Structure
