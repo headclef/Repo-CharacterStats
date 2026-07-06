@@ -12,7 +12,7 @@ public class Character_Stats : BaseUnityPlugin
 {
     private const string PluginGuid = "headclef.CharacterStats";
     private const string PluginName = "Character Stats";
-    private const string PluginVersion = "1.2.0";
+    private const string PluginVersion = "1.2.1";
 
     internal static Character_Stats Instance { get; private set; } = null!;
     internal new static ManualLogSource Logger => Instance._logger;
